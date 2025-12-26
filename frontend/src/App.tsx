@@ -14,9 +14,13 @@ export default function App() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<PredictResponse | null>(null);
+  const [multiResults, setMultiResults] = useState<PredictResponse[]>([]);
   const [showOverlay, setShowOverlay] = useState(true);
   const [consentStore, setConsentStore] = useState(false);
   const [dragging, setDragging] = useState(false);
+  const [viewMode, setViewMode] = useState<"single" | "multi">("single");
+  const [loadingAll, setLoadingAll] = useState(false);
+  const [showResultsModal, setShowResultsModal] = useState(false);
 
   useEffect(() => {
     fetchModels()
@@ -45,6 +49,15 @@ export default function App() {
     () => b64ToDataUrlPng(result?.gradcam?.heatmap_png_b64),
     [result]
   );
+  const hydratedMultiResults = useMemo(
+    () =>
+      multiResults.map((entry) => ({
+        result: entry,
+        overlayUrl: b64ToDataUrlPng(entry.gradcam?.overlay_png_b64),
+        heatmapUrl: b64ToDataUrlPng(entry.gradcam?.heatmap_png_b64),
+      })),
+    [multiResults]
+  );
   const fileSizeLabel = useMemo(() => {
     if (!file) return null;
     if (file.size < 1024) return `${file.size} B`;
@@ -62,9 +75,22 @@ export default function App() {
     return date.toLocaleString();
   }, [file]);
 
+  useEffect(() => {
+    if (!showResultsModal) {
+      return;
+    }
+    const previous = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.body.style.overflow = previous;
+    };
+  }, [showResultsModal]);
+
   const handleFile = useCallback((next: File | null) => {
     setFile(next);
     setResult(null);
+    setMultiResults([]);
+    setShowResultsModal(false);
   }, []);
 
   const handleDrop = useCallback(
@@ -95,14 +121,57 @@ export default function App() {
     setLoading(true);
     setError(null);
     setResult(null);
+    setMultiResults([]);
+    setShowResultsModal(false);
     try {
       const response = await predict(file, model, consentStore);
       setResult(response);
+      setShowResultsModal(true);
     } catch (err: any) {
       setError(String(err?.message ?? err));
+      setShowResultsModal(false);
     } finally {
       setLoading(false);
     }
+  }
+
+  async function runInferenceAll() {
+    if (!file || !models.length) return;
+    setLoadingAll(true);
+    setError(null);
+    setResult(null);
+    setMultiResults([]);
+    setShowResultsModal(false);
+    try {
+      const responses: PredictResponse[] = [];
+      for (const entry of models) {
+        const response = await predict(file, entry, consentStore);
+        responses.push(response);
+      }
+      setMultiResults(responses);
+      setShowResultsModal(true);
+    } catch (err: any) {
+      setError(String(err?.message ?? err));
+      setShowResultsModal(false);
+    } finally {
+      setLoadingAll(false);
+    }
+  }
+
+  const isBusy = loading || loadingAll;
+  const disableSingleRun = !file || !model || loading;
+  const disableMultiRun = !file || !models.length || loadingAll;
+  const canShowResults =
+    viewMode === "single" ? Boolean(result) : multiResults.length > 0;
+  const shouldRenderModal = showResultsModal && canShowResults;
+
+  function changeMode(next: "single" | "multi") {
+    if (viewMode === next) return;
+    setViewMode(next);
+    setError(null);
+    setResult(null);
+    setMultiResults([]);
+    setShowResultsModal(false);
   }
 
   return (
@@ -130,25 +199,60 @@ export default function App() {
 
       {error ? <div className="alert alert--error">{error}</div> : null}
 
-      <main className="layout">
-        <section className="panel panel--primary">
+      <main className="layout layout--split">
+        <section className="panel panel--primary" id="upload-panel">
           <h2 className="panelTitle">Upload & Settings</h2>
 
-          <label className="label" htmlFor="model">
-            Choose model
-          </label>
-          <select
-            id="model"
-            className="select"
-            value={model}
-            onChange={(event) => setModel(event.target.value)}
-          >
-            {models.map((entry) => (
-              <option key={entry} value={entry}>
-                {entry}
-              </option>
-            ))}
-          </select>
+          <div className="modeTabs" role="tablist" aria-label="Assessment mode">
+            <button
+              type="button"
+              className={`modeTab ${
+                viewMode === "single" ? "modeTab--active" : ""
+              }`}
+              onClick={() => changeMode("single")}
+            >
+              Single model
+            </button>
+            <button
+              type="button"
+              className={`modeTab ${
+                viewMode === "multi" ? "modeTab--active" : ""
+              }`}
+              onClick={() => changeMode("multi")}
+            >
+              All models
+            </button>
+          </div>
+
+          {viewMode === "single" ? (
+            <>
+              <label className="label" htmlFor="model">
+                Choose model
+              </label>
+              <select
+                id="model"
+                className="select"
+                value={model}
+                onChange={(event) => {
+                  setModel(event.target.value);
+                  setResult(null);
+                  setMultiResults([]);
+                  setShowResultsModal(false);
+                }}
+              >
+                {models.map((entry) => (
+                  <option key={entry} value={entry}>
+                    {entry}
+                  </option>
+                ))}
+              </select>
+            </>
+          ) : (
+            <p className="helper">
+              Run the uploaded X-ray through every available backbone to compare
+              predictions, confidence, and Grad-CAM overlays side by side.
+            </p>
+          )}
 
           <div className="label sectionLabel">Upload X-ray (JPG/PNG)</div>
           <label
@@ -193,143 +297,48 @@ export default function App() {
           </label>
 
           <div className="actions">
-            <button
-              className="button"
-              type="button"
-              disabled={!file || !model || loading}
-              onClick={runInference}
-            >
-              {loading ? "Running assessment…" : "Run assessment"}
-            </button>
+            {viewMode === "single" ? (
+              <button
+                className="button"
+                type="button"
+                disabled={disableSingleRun}
+                onClick={runInference}
+              >
+                {loading ? "Running assessment…" : "Run assessment"}
+              </button>
+            ) : (
+              <button
+                className="button"
+                type="button"
+                disabled={disableMultiRun}
+                onClick={runInferenceAll}
+              >
+                {loadingAll ? "Assessing all models…" : "Assess all models"}
+              </button>
+            )}
             <button
               className="button button--ghost"
               type="button"
-              disabled={!file || loading}
+              disabled={!file || isBusy}
               onClick={() => handleFile(null)}
             >
               Clear file
             </button>
+            {canShowResults ? (
+              <button
+                className="button button--ghost"
+                type="button"
+                onClick={() => setShowResultsModal(true)}
+              >
+                View results
+              </button>
+            ) : null}
           </div>
 
           <p className="helper">
             No images persist unless consent is granted. Validation rejects
             low-quality or non X-ray inputs before inference runs.
           </p>
-        </section>
-
-        <section className="panel panel--accent">
-          <h2 className="panelTitle">Results</h2>
-
-          {!result ? (
-            <p className="helper">Upload an image and run the assessment.</p>
-          ) : result.valid ? (
-            <>
-              <div className="summaryGrid">
-                <div className="summaryTile">
-                  <div className="summaryLabel">Prediction</div>
-                  <div className="summaryValue">
-                    <span className={`tag tag--${result.prediction}`}>
-                      {result.prediction}
-                    </span>
-                  </div>
-                  <div className="summaryHint">
-                    Based on thesis-ready preprocessing.
-                  </div>
-                </div>
-                <div className="summaryTile">
-                  <div className="summaryLabel">Confidence</div>
-                  <div className="summaryValue">
-                    {result.confidence
-                      ? `${(result.confidence * 100).toFixed(1)}%`
-                      : "—"}
-                  </div>
-                  <div className="summaryHint">
-                    Probability of fracture outcome.
-                  </div>
-                </div>
-                <div className="summaryTile">
-                  <div className="summaryLabel">Model</div>
-                  <div className="summaryValue">{result.model}</div>
-                  <div className="summaryHint">
-                    Loaded once from cached registry.
-                  </div>
-                </div>
-              </div>
-
-              {result.warnings?.length ? (
-                <div className="alert alert--warn">
-                  {result.warnings.map((warning, index) => (
-                    <div key={index}>{warning}</div>
-                  ))}
-                </div>
-              ) : null}
-
-              <div className="explanation">
-                <div className="label">Explanation</div>
-                <p>
-                  {result.explanation ?? "Model did not supply an explanation."}
-                </p>
-              </div>
-
-              <div className="gradcamHeader">
-                <div>
-                  <div className="label">Grad-CAM</div>
-                  <p className="helper">
-                    {result.gradcam?.status ?? "Not generated."}
-                    {result.gradcam?.message
-                      ? ` — ${result.gradcam.message}`
-                      : ""}
-                  </p>
-                </div>
-                <label className="toggle">
-                  <input
-                    type="checkbox"
-                    checked={showOverlay}
-                    onChange={(event) => setShowOverlay(event.target.checked)}
-                  />
-                  <span>Show heatmap overlay</span>
-                </label>
-              </div>
-
-              <div className="imageGrid">
-                <figure>
-                  <figcaption className="label">Original</figcaption>
-                  <div className="imgBox">
-                    {previewUrl ? (
-                      <img src={previewUrl} alt="Uploaded X-ray" />
-                    ) : (
-                      <div className="empty">Upload to see the preview.</div>
-                    )}
-                  </div>
-                </figure>
-                <figure>
-                  <figcaption className="label">Heatmap</figcaption>
-                  <div className="imgBox">
-                    {showOverlay && overlayUrl ? (
-                      <img src={overlayUrl} alt="Grad-CAM overlay" />
-                    ) : heatmapUrl ? (
-                      <img src={heatmapUrl} alt="Grad-CAM heatmap" />
-                    ) : (
-                      <div className="empty">No heatmap produced.</div>
-                    )}
-                  </div>
-                </figure>
-              </div>
-            </>
-          ) : (
-            <div className="alert alert--error" role="alert">
-              <strong>
-                {result.validation?.message ?? "Validation failed."}
-              </strong>
-              {result.validation?.reasons?.length ? (
-                <ul>
-                  {result.validation.reasons.map((reason, index) => (
-                    <li key={index}>{reason}</li>
-                  ))}
-                </ul>
-              ) : null}
-            </div>
-          )}
         </section>
 
         <section className="panel panel--neutral">
@@ -394,6 +403,281 @@ export default function App() {
           )}
         </section>
       </main>
+
+      {shouldRenderModal ? (
+        <div
+          className="modal modal--open"
+          role="dialog"
+          aria-modal="true"
+          aria-label="Assessment results"
+        >
+          <button
+            type="button"
+            className="modalBackdrop"
+            onClick={() => setShowResultsModal(false)}
+            aria-label="Close results"
+          />
+          <div className="modalContainer">
+            <header className="modalHeader">
+              <div>
+                <div className="modalEyebrow">
+                  {viewMode === "single" ? "Single model" : "All models"}
+                </div>
+                <h2 className="modalTitle">Assessment results</h2>
+              </div>
+              <button
+                type="button"
+                className="modalClose"
+                onClick={() => setShowResultsModal(false)}
+              >
+                Close
+              </button>
+            </header>
+            <div className="modalBody">
+              {viewMode === "single" ? (
+                result?.valid || result ? (
+                  <>
+                    {result && result.valid ? null : null}
+                    {result && result.valid ? (
+                      <div className="summaryGrid">
+                        <div className="summaryTile">
+                          <div className="summaryLabel">Prediction</div>
+                          <div className="summaryValue">
+                            <span className={`tag tag--${result.prediction}`}>
+                              {result.prediction}
+                            </span>
+                          </div>
+                          <div className="summaryHint">
+                            Based on thesis-ready preprocessing.
+                          </div>
+                        </div>
+                        <div className="summaryTile">
+                          <div className="summaryLabel">Confidence</div>
+                          <div className="summaryValue">
+                            {result.confidence
+                              ? `${(result.confidence * 100).toFixed(1)}%`
+                              : "—"}
+                          </div>
+                          <div className="summaryHint">
+                            Probability of fracture outcome.
+                          </div>
+                        </div>
+                        <div className="summaryTile">
+                          <div className="summaryLabel">Model</div>
+                          <div className="summaryValue">{result.model}</div>
+                          <div className="summaryHint">
+                            Loaded once from cached registry.
+                          </div>
+                        </div>
+                      </div>
+                    ) : null}
+
+                    {result?.warnings?.length ? (
+                      <div className="alert alert--warn">
+                        {result.warnings.map((warning, index) => (
+                          <div key={index}>{warning}</div>
+                        ))}
+                      </div>
+                    ) : null}
+
+                    {result?.valid === false ? (
+                      <div className="alert alert--error" role="alert">
+                        <strong>
+                          {result.validation?.message ?? "Validation failed."}
+                        </strong>
+                        {result.validation?.reasons?.length ? (
+                          <ul>
+                            {result.validation.reasons.map((reason, index) => (
+                              <li key={index}>{reason}</li>
+                            ))}
+                          </ul>
+                        ) : null}
+                      </div>
+                    ) : null}
+
+                    <div className="explanation">
+                      <div className="label">Explanation</div>
+                      <p>
+                        {result?.explanation ??
+                          "Model did not supply an explanation."}
+                      </p>
+                    </div>
+
+                    <div className="gradcamHeader">
+                      <div>
+                        <div className="label">Grad-CAM</div>
+                        <p className="helper">
+                          {result?.gradcam?.status ?? "Not generated."}
+                          {result?.gradcam?.message
+                            ? ` — ${result.gradcam.message}`
+                            : ""}
+                        </p>
+                      </div>
+                      <label className="toggle">
+                        <input
+                          type="checkbox"
+                          checked={showOverlay}
+                          onChange={(event) =>
+                            setShowOverlay(event.target.checked)
+                          }
+                        />
+                        <span>Show heatmap overlay</span>
+                      </label>
+                    </div>
+
+                    <div className="imageGrid">
+                      <figure>
+                        <figcaption className="label">Original</figcaption>
+                        <div className="imgBox">
+                          {previewUrl ? (
+                            <img src={previewUrl} alt="Uploaded X-ray" />
+                          ) : (
+                            <div className="empty">Upload to see the preview.</div>
+                          )}
+                        </div>
+                      </figure>
+                      <figure>
+                        <figcaption className="label">Heatmap</figcaption>
+                        <div className="imgBox">
+                          {showOverlay && overlayUrl ? (
+                            <img src={overlayUrl} alt="Grad-CAM overlay" />
+                          ) : heatmapUrl ? (
+                            <img src={heatmapUrl} alt="Grad-CAM heatmap" />
+                          ) : (
+                            <div className="empty">No heatmap produced.</div>
+                          )}
+                        </div>
+                      </figure>
+                    </div>
+                  </>
+                ) : null
+              ) : (
+                <div className="multiGrid">
+                  {hydratedMultiResults.map(
+                    ({
+                      result: entry,
+                      overlayUrl: overlay,
+                      heatmapUrl: heatmap,
+                    }) => (
+                      <article
+                        key={`${entry.model}-${entry.prediction}-$${
+                          entry.confidence ?? "na"
+                        }`}
+                        className="multiCard"
+                      >
+                        <header className="multiCardHeader">
+                          <div className="label">Model</div>
+                          <h3>{entry.model}</h3>
+                        </header>
+                        <div className="summaryGrid">
+                          <div className="summaryTile">
+                            <div className="summaryLabel">Prediction</div>
+                            <div className="summaryValue">
+                              <span className={`tag tag--${entry.prediction}`}>
+                                {entry.prediction}
+                              </span>
+                            </div>
+                            <div className="summaryHint">
+                              Based on thesis-ready preprocessing.
+                            </div>
+                          </div>
+                          <div className="summaryTile">
+                            <div className="summaryLabel">Confidence</div>
+                            <div className="summaryValue">
+                              {entry.confidence
+                                ? `${(entry.confidence * 100).toFixed(1)}%`
+                                : "—"}
+                            </div>
+                            <div className="summaryHint">
+                              Probability of fracture outcome.
+                            </div>
+                          </div>
+                        </div>
+
+                        {entry.warnings?.length ? (
+                          <div className="alert alert--warn">
+                            {entry.warnings.map((warning, index) => (
+                              <div key={index}>{warning}</div>
+                            ))}
+                          </div>
+                        ) : null}
+
+                        <div className="explanation">
+                          <div className="label">Explanation</div>
+                          <p>
+                            {entry.explanation ??
+                              "Model did not supply an explanation."}
+                          </p>
+                        </div>
+
+                        <div className="gradcamHeader">
+                          <div>
+                            <div className="label">Grad-CAM</div>
+                            <p className="helper">
+                              {entry.gradcam?.status ?? "Not generated."}
+                              {entry.gradcam?.message
+                                ? ` — ${entry.gradcam.message}`
+                                : ""}
+                            </p>
+                          </div>
+                        </div>
+
+                        <div className="imageGrid">
+                          <figure>
+                            <figcaption className="label">Original</figcaption>
+                            <div className="imgBox">
+                              {previewUrl ? (
+                                <img src={previewUrl} alt="Uploaded X-ray" />
+                              ) : (
+                                <div className="empty">
+                                  Upload to see the preview.
+                                </div>
+                              )}
+                            </div>
+                          </figure>
+                          <figure>
+                            <figcaption className="label">Heatmap</figcaption>
+                            <div className="imgBox">
+                              {showOverlay && overlay ? (
+                                <img
+                                  src={overlay}
+                                  alt={`Grad-CAM overlay for ${entry.model}`}
+                                />
+                              ) : heatmap ? (
+                                <img
+                                  src={heatmap}
+                                  alt={`Grad-CAM heatmap for ${entry.model}`}
+                                />
+                              ) : (
+                                <div className="empty">No heatmap produced.</div>
+                              )}
+                            </div>
+                          </figure>
+                        </div>
+
+                        {!entry.valid ? (
+                          <div className="alert alert--error" role="alert">
+                            <strong>
+                              {entry.validation?.message ?? "Validation failed."}
+                            </strong>
+                            {entry.validation?.reasons?.length ? (
+                              <ul>
+                                {entry.validation.reasons.map((reason, index) => (
+                                  <li key={index}>{reason}</li>
+                                ))}
+                              </ul>
+                            ) : null}
+                          </div>
+                        ) : null}
+                      </article>
+                    )
+                  )}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      ) : null}
 
       <footer className="footer">
         <div className="footerContent">
