@@ -112,8 +112,8 @@ export default function App() {
           <div className="heroEyebrow">Feature-focused preprocessing & XAI</div>
           <h1 className="heroTitle">Bone Fracture Assessment</h1>
           <p className="heroLead">
-            Upload an upper-limb X-ray, validate quality heuristics, and review
-            Grad-CAM overlays before accepting any prediction.
+            <strong>Need a quick validation check?</strong> Run Grad-CAM
+            overlays before accepting any prediction.
           </p>
         </div>
         <div className="heroBadges">
@@ -396,12 +396,22 @@ export default function App() {
       </main>
 
       <footer className="footer">
-        <div>
-          <strong>Need a quick validation check?</strong> Run{" "}
-          <code>scripts/smoke_predict.py --summary</code> from the backend to
-          confirm model readiness.
+        <div className="footerContent">
+          <div className="footerTitle">Ready for a live demo?</div>
+          <p>
+            Start with a smoke test: run{" "}
+            <code>scripts/smoke_predict.py --summary</code> to confirm your
+            backend and models are loaded, then open the frontend to walk
+            through predictions and Grad-CAM overlays.
+          </p>
         </div>
-        <div>TensorFlow 2.20 · React 18 · Grad-CAM explainability stack</div>
+
+        <div className="footerBadgeList">
+          <span>TensorFlow 2.20 stack</span>
+          <span>FastAPI inference service</span>
+          <span>React + Vite UI</span>
+          <span>Grad-CAM explainability pipeline</span>
+        </div>
       </footer>
     </div>
   );
