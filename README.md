@@ -1,6 +1,6 @@
 # Bone Fracture Assessment System (XAI)
 
-Thesis alignment: **“Feature-Focused Preprocessing in Bone Fracture Imaging Using Explainable AI.”**
+Thesis Title: **“Feature-Focused Preprocessing in Bone Fracture Imaging Using Explainable AI.”**
 
 This project provides a research-oriented web system for:
 
@@ -28,14 +28,12 @@ Place the provided `.keras` files here:
 - `backend/models/InceptionV3.keras`
 - `backend/models/Xception.keras`
 
-Or set `XRAY_MODEL_DIR` to point to the folder containing them.
-
 ## Backend: run (Windows PowerShell)
 
 ```powershell
 cd backend
 python -m venv venv
-.\venv\Scripts\Activate.ps1
+.\venv\Scripts\Activate
 pip install -r requirements.txt
 uvicorn app.main:app --reload --port 8000
 ```
@@ -96,3 +94,18 @@ npm run build
 ## Notes
 
 - This repo pins TensorFlow to **2.20.x** (works with Windows + Python 3.13). If you need CPU/GPU-specific guidance, tell me your setup and I’ll adjust pins accordingly.
+
+This research work was developed as part of a thesis defense on **Feature-Focused Preprocessing in Bone Fracture Imaging Using Explainable AI**.
+
+**Team Information:**
+- **Lutfur Rahman Tanvir**
+  - Department of CSE, DIU
+
+- **Md. Hasanur Miah**
+  - Department of CSE, DIU
+
+
+**Application Preview:**
+
+![alt text](image-1.png)
+![alt text](image.png)
