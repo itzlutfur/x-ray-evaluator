@@ -1,0 +1,35 @@
+services:
+  # Backend API Service
+  - type: web
+    name: xray-backend
+    runtime: python
+    plan: free
+    rootDir: backend
+    buildCommand: bash build.sh
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.0
+      - key: XRAY_MODEL_DIR
+        value: /opt/render/project/src/backend/models
+      - key: XRAY_CONFIDENCE_LOW_THRESHOLD
+        value: 0.60
+      - key: XRAY_CORS_ORIGINS
+        value: '["https://xray-frontend.onrender.com"]'
+    healthCheckPath: /healthz
+
+  # Frontend Static Site
+  - type: web
+    name: xray-frontend
+    runtime: static
+    plan: free
+    rootDir: frontend
+    buildCommand: npm ci && npm run build
+    staticPublishPath: ./dist
+    envVars:
+      - key: VITE_API_BASE
+        value: https://xray-backend.onrender.com
+    routes:
+      - type: rewrite
+        source: /*
+        destination: /index.html
