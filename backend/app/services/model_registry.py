@@ -43,6 +43,12 @@ def get_or_load_model(name: str) -> LoadedModel:
         if name in _MODELS:
             return _MODELS[name]
 
+        # Free tier optimization: Clear all models before loading new one (512MB limit)
+        # Only keep one model in memory at a time
+        if _MODELS:
+            _MODELS.clear()
+            tf.keras.backend.clear_session()
+
         settings = get_settings()
         model_path = Path(settings.model_dir) / SUPPORTED_MODELS[name]
         if not model_path.exists():
